@@ -31,8 +31,8 @@ func init() {
 }
 
 func Publishv1(input chan []*FileEvent,
-	registrar chan []*FileEvent,
-	config *NetworkConfig) {
+registrar chan []*FileEvent,
+config *NetworkConfig) {
 	var buffer bytes.Buffer
 	var socket *tls.Conn
 	var sequence uint32
@@ -67,7 +67,7 @@ func Publishv1(input chan []*FileEvent,
 			socket = connect(config)
 		}
 
-	SendPayload:
+		SendPayload:
 		for {
 			// Abort if our whole request takes longer than the configured
 			// network timeout.
@@ -136,7 +136,7 @@ func connect(config *NetworkConfig) (socket *tls.Conn) {
 			config.SSLCertificate, config.SSLKey)
 		cert, err := tls.LoadX509KeyPair(config.SSLCertificate, config.SSLKey)
 		if err != nil {
-			fault ("Failed loading client ssl certificate: %s\n", err)
+			fault("Failed loading client ssl certificate: %s\n", err)
 		}
 		tlsconfig.Certificates = []tls.Certificate{cert}
 	}
@@ -165,24 +165,34 @@ func connect(config *NetworkConfig) (socket *tls.Conn) {
 		tlsconfig.RootCAs.AddCert(cert)
 	}
 
+	var host string
+	var port int
+	var addresses []string
+	k := 1
+
 	for {
 		// Pick a random server from the list.
-		hostport := config.Servers[rand.Int()%len(config.Servers)]
+		hostport := config.Servers[rand.Int() % len(config.Servers)]
 		submatch := hostport_re.FindSubmatch([]byte(hostport))
 		if submatch == nil {
 			fault("Invalid host:port given: %s", hostport)
 		}
-		host := string(submatch[1])
-		port := string(submatch[2])
-		addresses, err := net.LookupHost(host)
+		host = string(submatch[1])
+		port = string(submatch[2])
+		emit("%d) DNS lookup name:  %s\n", k, host)
+		var err error
+		addresses, err = net.LookupHost(host)
 
 		if err != nil {
-			emit("DNS lookup failure \"%s\": %s\n", host, err)
-			time.Sleep(1 * time.Second)
+			emit("DNS lookup failure \"%s\": %s. Retrying...\n", host, err)
+			time.Sleep(2 * k * time.Second)
+			k = k + 1
 			continue
 		}
+	}
 
-		address := addresses[rand.Int()%len(addresses)]
+	for {
+		address := addresses[rand.Int() % len(addresses)]
 		var addressport string
 
 		ip := net.ParseIP(address)
@@ -228,7 +238,7 @@ func writeDataFrame(event *FileEvent, sequence uint32, output io.Writer) {
 	// sequence number
 	binary.Write(output, binary.BigEndian, uint32(sequence))
 	// 'pair' count
-	binary.Write(output, binary.BigEndian, uint32(len(*event.Fields)+4))
+	binary.Write(output, binary.BigEndian, uint32(len(*event.Fields) + 4))
 
 	writeKV("file", *event.Source, output)
 	writeKV("host", hostname, output)
